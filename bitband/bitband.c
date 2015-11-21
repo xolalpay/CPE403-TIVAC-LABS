@@ -36,6 +36,13 @@
 #include "driverlib/uart.h"
 #include "utils/uartstdio.h"
 
+/**************************
+YOSEMIT XOLALPA ROSALES
+PROF. VENKI
+CPE403
+TIVAC-LAB08 - PartB
+**************************/
+
 //*****************************************************************************
 //
 //! \addtogroup example_list
