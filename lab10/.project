@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <projectDescription>
-	<name>lab3</name>
+	<name>lab10</name>
 	<comment></comment>
 	<projects>
 	</projects>
@@ -24,4 +24,21 @@
 		<nature>org.eclipse.cdt.core.ccnature</nature>
 		<nature>org.eclipse.cdt.managedbuilder.core.ScannerConfigNature</nature>
 	</natures>
+	<linkedResources>
+		<link>
+			<name>driverlib.lib</name>
+			<type>1</type>
+			<locationURI>PARENT-1-TIVAWARE_INSTALL/TivaWare_C_Series-2.1.1.71/driverlib/ccs/Debug/driverlib.lib</locationURI>
+		</link>
+		<link>
+			<name>grlib.lib</name>
+			<type>1</type>
+			<locationURI>PARENT-1-TIVAWARE_INSTALL/TivaWare_C_Series-2.1.1.71/grlib/ccs/Debug/grlib.lib</locationURI>
+		</link>
+		<link>
+			<name>ustdlib.c</name>
+			<type>1</type>
+			<locationURI>PARENT-1-TIVAWARE_INSTALL/TivaWare_C_Series-2.1.1.71/utils/ustdlib.c</locationURI>
+		</link>
+	</linkedResources>
 </projectDescription>
