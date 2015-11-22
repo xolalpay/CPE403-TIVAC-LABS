@@ -11,9 +11,8 @@
 YOSEMIT XOLALPA ROSALES
 PROF. VENKI
 CPE403
-TIVAC-LAB10-B
+TIVAC-LAB10-C
 **************************/
-
 extern const uint8_t g_pui8Image[];
 tContext sContext;
 tRectangle sRect;
@@ -33,6 +32,24 @@ int main(void)
 
    SysCtlDelay(SysCtlClockGet());
    // Later lab steps go between here
+
+   ClrScreen();
+
+   sRect.i16XMin = 1;
+   sRect.i16YMin = 1;
+   sRect.i16XMax = 318;
+   sRect.i16YMax = 238;
+   GrContextForegroundSet(&sContext, ClrRed);
+   GrContextFontSet(&sContext, &g_sFontCmss30b);
+   GrStringDraw(&sContext, "CPE403", -1, 110, 2, 0);
+   GrStringDraw(&sContext, "LAB 10", -1, 80, 32, 0);
+   GrStringDraw(&sContext, "GRAPHICS", -1, 100, 62, 0);
+   GrStringDraw(&sContext, "LIBRARY", -1, 135, 92, 0);
+   GrContextForegroundSet(&sContext, ClrWhite);
+   GrRectDraw(&sContext, &sRect);
+   GrFlush(&sContext);
+
+   SysCtlDelay(SysCtlClockGet());
 
    // and here
    ClrScreen();
