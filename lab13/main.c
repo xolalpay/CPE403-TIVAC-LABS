@@ -1,4 +1,4 @@
-	// Lab12a - DMA
+// Lab12b - UART / DMA Ping-Pong
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -12,48 +12,50 @@
 #include "driverlib/pin_map.h"
 #include "driverlib/rom.h"
 #include "driverlib/sysctl.h"
+#include "driverlib/uart.h"
 #include "driverlib/udma.h"
 
-// Define source and destination buffers
-#define MEM_BUFFER_SIZE         1024
-static uint32_t g_ui32SrcBuf[MEM_BUFFER_SIZE];
-static uint32_t g_ui32DstBuf[MEM_BUFFER_SIZE];
+// Buffer definitions
+#define UART_TXBUF_SIZE         256
+#define UART_RXBUF_SIZE         256
+static uint8_t g_pui8TxBuf[UART_TXBUF_SIZE];
+static uint8_t g_pui8RxPing[UART_RXBUF_SIZE];
+static uint8_t g_pui8RxPong[UART_RXBUF_SIZE];
 
-// Define errors counters
+// Error counter
 static uint32_t g_ui32DMAErrCount = 0;
-static uint32_t g_ui32BadISR = 0;
 
-// Define transfer counter
-static uint32_t g_ui32MemXferCount = 0;
+// Transfer counters
+static uint32_t g_ui32RxPingCount = 0;
+static uint32_t g_ui32RxPongCount = 0;
 
-// The control table used by the uDMA controller.  This table must be aligned to a 1024 byte boundary.
-#pragma DATA_ALIGN(pui8ControlTable, 1024)
-uint8_t pui8ControlTable[1024];
+// uDMA control table aligned to 1024-byte boundary
+#pragma DATA_ALIGN(ucControlTable, 1024)
+uint8_t ucControlTable[1024];
 
 // Library error routine
 #ifdef DEBUG
+
+/**************************
+YOSEMIT XOLALPA ROSALES
+PROF. VENKI
+CPE403
+TIVAC-LAB13-partB
+**************************/
 void
 __error__(char *pcFilename, uint32_t ui32Line)
 {
 }
 #endif
 
-/**************************
-YOSEMIT XOLALPA ROSALES
-PROF. VENKI
-CPE403
-TIVAC-LAB13-A
-**************************/
-// uDMA transfer error handler
+// uDMA error handler
 void
 uDMAErrorHandler(void)
 {
     uint32_t ui32Status;
 
-    // Check for uDMA error bit
     ui32Status = ROM_uDMAErrorStatusGet();
 
-    // If there is a uDMA error, then clear the error and increment the error counter.
     if(ui32Status)
     {
         ROM_uDMAErrorStatusClear();
@@ -61,84 +63,137 @@ uDMAErrorHandler(void)
     }
 }
 
-// uDMA interrupt handler. Run when transfer is complete.
+// UART interrupt handler. Called on completion of uDMA transfer
 void
-uDMAIntHandler(void)
+UART1IntHandler(void)
 {
+    uint32_t ui32Status;
     uint32_t ui32Mode;
 
-    // Check for the primary control structure to indicate complete.
-    ui32Mode = ROM_uDMAChannelModeGet(UDMA_CHANNEL_SW);
+    ui32Status = ROM_UARTIntStatus(UART1_BASE, 1);
+
+    ROM_UARTIntClear(UART1_BASE, ui32Status);
+
+    ui32Mode = ROM_uDMAChannelModeGet(UDMA_CHANNEL_UART1RX | UDMA_PRI_SELECT);
+
     if(ui32Mode == UDMA_MODE_STOP)
     {
-        // Increment the count of completed transfers.
-        g_ui32MemXferCount++;
+        g_ui32RxPingCount++;
 
-        // Configure it for another transfer.
-        ROM_uDMAChannelTransferSet(UDMA_CHANNEL_SW, UDMA_MODE_AUTO,
-                                   g_ui32SrcBuf, g_ui32DstBuf, MEM_BUFFER_SIZE);
-
-        // Initiate another transfer.
-        ROM_uDMAChannelEnable(UDMA_CHANNEL_SW);
-        ROM_uDMAChannelRequest(UDMA_CHANNEL_SW);
+        ROM_uDMAChannelTransferSet(UDMA_CHANNEL_UART1RX | UDMA_PRI_SELECT,
+                                   UDMA_MODE_PINGPONG,
+                                   (void *)(UART1_BASE + UART_O_DR),
+                                   g_pui8RxPing, sizeof(g_pui8RxPing));
     }
 
-    // If the channel is not stopped, then something is wrong.
-    else
+    ui32Mode = ROM_uDMAChannelModeGet(UDMA_CHANNEL_UART1RX | UDMA_ALT_SELECT);
+
+    if(ui32Mode == UDMA_MODE_STOP)
     {
-        g_ui32BadISR++;
+        g_ui32RxPongCount++;
+
+        ROM_uDMAChannelTransferSet(UDMA_CHANNEL_UART1RX | UDMA_ALT_SELECT,
+                                   UDMA_MODE_PINGPONG,
+                                   (void *)(UART1_BASE + UART_O_DR),
+                                   g_pui8RxPong, sizeof(g_pui8RxPong));
+    }
+
+    if(!ROM_uDMAChannelIsEnabled(UDMA_CHANNEL_UART1TX))
+    {
+
+    	ROM_uDMAChannelTransferSet(UDMA_CHANNEL_UART1TX | UDMA_PRI_SELECT,
+                                   UDMA_MODE_BASIC, g_pui8TxBuf,
+                                   (void *)(UART1_BASE + UART_O_DR),
+                                   sizeof(g_pui8TxBuf));
+
+        ROM_uDMAChannelEnable(UDMA_CHANNEL_UART1TX);
     }
 }
 
-// Initialize the uDMA software channel to perform a memory to memory uDMA transfer.
+// Initialize UART uDMA transfer
 void
-InitSWTransfer(void)
+InitUART1Transfer(void)
 {
     uint32_t ui32Idx;
 
-    // Fill the source memory buffer with a simple incrementing pattern.
-    for(ui32Idx = 0; ui32Idx < MEM_BUFFER_SIZE; ui32Idx++)
+    // Initialize transmit buffer with some data
+    for(ui32Idx = 0; ui32Idx < UART_TXBUF_SIZE; ui32Idx++)
     {
-        g_ui32SrcBuf[ui32Idx] = ui32Idx;
+        g_pui8TxBuf[ui32Idx] = ui32Idx;
     }
 
-    // Enable interrupts from the uDMA software channel.
-    ROM_IntEnable(INT_UDMA);
+    // Enable UART1 and make sure it can run while the CPU sleeps
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_UART1);
+    ROM_SysCtlPeripheralSleepEnable(SYSCTL_PERIPH_UART1);
 
-    // Place the uDMA channel attributes in a known state. These should already be disabled by default.
-    ROM_uDMAChannelAttributeDisable(UDMA_CHANNEL_SW,
-                                    UDMA_ATTR_USEBURST | UDMA_ATTR_ALTSELECT |
-                                    (UDMA_ATTR_HIGH_PRIORITY |
-                                    UDMA_ATTR_REQMASK));
+    // Configure and enable the UART with DMA
+    ROM_UARTConfigSetExpClk(UART1_BASE, ROM_SysCtlClockGet(), 115200,
+                            UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE |
+                            UART_CONFIG_PAR_NONE);
 
-    // Configure the control parameters for the SW channel.  The SW channel
-    // will be used to transfer between two memory buffers, 32 bits at a time,
-    // and the address increment is 32 bits for both source and destination.
-    // The arbitration size will be set to 8, which causes the uDMA controller
-    // to rearbitrate after 8 items are transferred.  This keeps this channel from
-    // hogging the uDMA controller once the transfer is started, and allows other
-    // channels to get serviced if they are higher priority.
-    ROM_uDMAChannelControlSet(UDMA_CHANNEL_SW | UDMA_PRI_SELECT,
-                              UDMA_SIZE_32 | UDMA_SRC_INC_32 | UDMA_DST_INC_32 |
-                              UDMA_ARB_8);
+    ROM_UARTFIFOLevelSet(UART1_BASE, UART_FIFO_TX4_8, UART_FIFO_RX4_8);
 
-    // Set up the transfer parameters for the software channel.  This will
-    // configure the transfer buffers and the transfer size.  Auto mode must be
-    // used for software transfers.
-    ROM_uDMAChannelTransferSet(UDMA_CHANNEL_SW | UDMA_PRI_SELECT,
-                               UDMA_MODE_AUTO, g_ui32SrcBuf, g_ui32DstBuf,
-                               MEM_BUFFER_SIZE);
+    ROM_UARTEnable(UART1_BASE);
+    ROM_UARTDMAEnable(UART1_BASE, UART_DMA_RX | UART_DMA_TX);
 
-    // Now the software channel is primed to start a transfer.  The channel
-    // must be enabled.  For software based transfers, a request must be
-    // issued.  After this, the uDMA memory transfer begins.
-    ROM_uDMAChannelEnable(UDMA_CHANNEL_SW);
-    ROM_uDMAChannelRequest(UDMA_CHANNEL_SW);
+    	// Loopback mode
+    HWREG(UART1_BASE + UART_O_CTL) |= UART_CTL_LBE;
+
+    ROM_IntEnable(INT_UART1);
+
+    // Receive channel setup for ping and pong
+    ROM_uDMAChannelAttributeDisable(UDMA_CHANNEL_UART1RX,
+                                    UDMA_ATTR_ALTSELECT | UDMA_ATTR_USEBURST |
+                                    UDMA_ATTR_HIGH_PRIORITY |
+                                    UDMA_ATTR_REQMASK);
+
+    ROM_uDMAChannelControlSet(UDMA_CHANNEL_UART1RX | UDMA_PRI_SELECT,
+                              UDMA_SIZE_8 | UDMA_SRC_INC_NONE | UDMA_DST_INC_8 |
+                              UDMA_ARB_4);
+
+    ROM_uDMAChannelControlSet(UDMA_CHANNEL_UART1RX | UDMA_ALT_SELECT,
+                              UDMA_SIZE_8 | UDMA_SRC_INC_NONE | UDMA_DST_INC_8 |
+                              UDMA_ARB_4);
+
+    ROM_uDMAChannelTransferSet(UDMA_CHANNEL_UART1RX | UDMA_PRI_SELECT,
+                               UDMA_MODE_PINGPONG,
+                               (void *)(UART1_BASE + UART_O_DR),
+                               g_pui8RxPing, sizeof(g_pui8RxPing));
+
+    ROM_uDMAChannelTransferSet(UDMA_CHANNEL_UART1RX | UDMA_ALT_SELECT,
+                               UDMA_MODE_PINGPONG,
+                               (void *)(UART1_BASE + UART_O_DR),
+                               g_pui8RxPong, sizeof(g_pui8RxPong));
+
+    // Transmit channel setup for a basic transfer
+    ROM_uDMAChannelAttributeDisable(UDMA_CHANNEL_UART1TX,
+                                    UDMA_ATTR_ALTSELECT |
+                                    UDMA_ATTR_HIGH_PRIORITY |
+                                    UDMA_ATTR_REQMASK);
+
+    ROM_uDMAChannelAttributeEnable(UDMA_CHANNEL_UART1TX, UDMA_ATTR_USEBURST);
+
+
+    ROM_uDMAChannelControlSet(UDMA_CHANNEL_UART1TX | UDMA_PRI_SELECT,
+                              UDMA_SIZE_8 | UDMA_SRC_INC_8 | UDMA_DST_INC_NONE |
+                              UDMA_ARB_4);
+
+    ROM_uDMAChannelTransferSet(UDMA_CHANNEL_UART1TX | UDMA_PRI_SELECT,
+                               UDMA_MODE_BASIC, g_pui8TxBuf,
+                               (void *)(UART1_BASE + UART_O_DR),
+                               sizeof(g_pui8TxBuf));
+
+    // Enable both channels
+    ROM_uDMAChannelEnable(UDMA_CHANNEL_UART1RX);
+    ROM_uDMAChannelEnable(UDMA_CHANNEL_UART1TX);
 }
 
+// main code
 int
 main(void)
 {
+    volatile uint32_t ui32Loop;
+
 
     ROM_FPULazyStackingEnable();
 
@@ -147,17 +202,36 @@ main(void)
 
     ROM_SysCtlPeripheralClockGating(true);
 
+    // GPIO setup for LEDs
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+    ROM_GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_2);
+
+    // GPIO setup for UART
+    ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA);
+    ROM_SysCtlPeripheralSleepEnable(SYSCTL_PERIPH_UART0);
+    GPIOPinConfigure(GPIO_PA0_U0RX);
+    GPIOPinConfigure(GPIO_PA1_U0TX);
+    ROM_GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1);
+
+    // Enable uDMA
     ROM_SysCtlPeripheralEnable(SYSCTL_PERIPH_UDMA);
     ROM_SysCtlPeripheralSleepEnable(SYSCTL_PERIPH_UDMA);
-
     ROM_IntEnable(INT_UDMAERR);
     ROM_uDMAEnable();
+    ROM_uDMAControlBaseSet(ucControlTable);
 
-    ROM_uDMAControlBaseSet(pui8ControlTable);
+    // Initialize the uDMA/UART transfer
+    InitUART1Transfer();
 
-    InitSWTransfer();
-
+    // Blink the LED while the transfers occur
     while(1)
     {
+        GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_2, GPIO_PIN_2);
+
+        SysCtlDelay(SysCtlClockGet() / 20 / 3);
+
+        GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_2, 0);
+
+        SysCtlDelay(SysCtlClockGet() / 20 / 3);
     }
 }
